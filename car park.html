@@ -1,0 +1,359 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Car Park Management System</title>
+<style>
+:root {
+    --bg1: #0f0c29;
+    --bg2: #302b63;
+    --accent: #ff6ec7;
+    --accent2: #6efff6;
+    --text: #ffffff;
+}
+body {
+    margin: 0;
+    font-family: Arial, sans-serif;
+    background: linear-gradient(135deg, var(--bg1), var(--bg2));
+    color: var(--text);
+    display: flex;
+}
+#sidebar {
+    width: 200px;
+    background: rgba(0,0,0,0.3);
+    padding: 10px;
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+}
+.slot {
+    padding: 8px;
+    border: 1px solid var(--accent);
+    border-radius: 5px;
+    text-align: center;
+    transition: background 0.3s, transform 0.2s;
+}
+.slot.highlight {
+    background: var(--accent2);
+    transform: scale(1.05);
+}
+#main {
+    flex: 1;
+    padding: 20px;
+    display: flex;
+    flex-direction: column;
+    gap: 20px;
+}
+.panel {
+    background: rgba(0,0,0,0.3);
+    padding: 20px;
+    border-radius: 10px;
+    backdrop-filter: blur(8px);
+}
+input, select, button {
+    padding: 8px;
+    margin: 5px 0;
+    border-radius: 5px;
+    border: none;
+}
+button {
+    background: var(--accent);
+    color: #000;
+    font-weight: bold;
+    cursor: pointer;
+    transition: 0.2s;
+}
+button:hover { opacity: 0.8; }
+table {
+    width: 100%;
+    border-collapse: collapse;
+    margin-top: 10px;
+}
+th, td {
+    border: 1px solid var(--accent);
+    padding: 5px;
+    text-align: center;
+}
+th { background: rgba(255,255,255,0.1); }
+</style>
+</head>
+<body>
+
+<div id="sidebar"></div>
+
+<div id="main">
+    <!-- User Panel -->
+    <div id="user-panel" class="panel">
+        <h2>User Panel</h2>
+        <input type="text" id="plate" placeholder="Plate Number">
+        <input type="text" id="brand" placeholder="Car Brand">
+        <button id="park-btn">Park Car</button>
+        <button id="leave-btn">Leave Parking</button>
+        <p id="park-result" style="font-size:1.2em;font-weight:bold;"></p>
+    </div>
+
+    <!-- Search Panel -->
+    <div id="search-panel" class="panel">
+        <h2>Find Your Car</h2>
+        <input type="text" id="search-plate" placeholder="Plate Number">
+        <button id="find-btn">Find Car</button>
+        <p id="search-result" style="font-size:1.2em;font-weight:bold;"></p>
+    </div>
+
+    <!-- Admin Login -->
+    <div id="admin-login" class="panel">
+        <h2>Admin Login</h2>
+        <input type="password" id="admin-pass" placeholder="Password">
+        <button id="admin-login-btn">Login</button>
+    </div>
+
+    <!-- Admin Panel -->
+    <div id="admin-panel" class="panel" style="display:none;">
+        <h2>Admin Panel</h2>
+        <button id="logout-btn">Logout</button>
+        <button id="refresh-btn">Refresh Tables</button>
+
+        <h3>Current Parked Cars</h3>
+        <table>
+            <thead>
+                <tr>
+                    <th>Plate</th>
+                    <th>Brand</th>
+                    <th>Slot</th>
+                    <th>Time In</th>
+                    <th>Remove</th>
+                </tr>
+            </thead>
+            <tbody id="admin-table-body"></tbody>
+        </table>
+
+        <h3>History (Removed Cars)</h3>
+        <table>
+            <thead>
+                <tr>
+                    <th>Plate</th>
+                    <th>Brand</th>
+                    <th>Slot</th>
+                    <th>Time In</th>
+                    <th>Time Out</th>
+                </tr>
+            </thead>
+            <tbody id="history-table-body"></tbody>
+        </table>
+    </div>
+</div>
+
+<script type="module">
+import { initializeApp } from "https://www.gstatic.com/firebasejs/12.6.0/firebase-app.js";
+import { getDatabase, ref, set, onValue, remove, push } from "https://www.gstatic.com/firebasejs/12.6.0/firebase-database.js";
+
+// Firebase config
+const firebaseConfig = {
+    apiKey: "AIzaSyB1NnOdvMGlDsrb33vX12mraT35ODq3Kdg",
+    authDomain: "carparkmanagementsystem-strayy.firebaseapp.com",
+    databaseURL: "https://carparkmanagementsystem-strayy-default-rtdb.firebaseio.com",
+    projectId: "carparkmanagementsystem-strayy",
+    storageBucket: "carparkmanagementsystem-strayy.firebasestorage.app",
+    messagingSenderId: "325928575464",
+    appId: "1:325928575464:web:c5042f7ef963231785045d",
+    measurementId: "G-9G5M9M3L47"
+};
+
+// Initialize Firebase
+const app = initializeApp(firebaseConfig);
+const db = getDatabase(app);
+
+let parking = {};
+let history = {};
+const maxSlots = 10;
+
+// DOM references
+const slotsDiv = document.getElementById("sidebar");
+const parkBtn = document.getElementById("park-btn");
+const leaveBtn = document.getElementById("leave-btn");
+const plateInput = document.getElementById("plate");
+const brandInput = document.getElementById("brand");
+const parkResult = document.getElementById("park-result");
+
+const searchBtn = document.getElementById("find-btn");
+const searchPlate = document.getElementById("search-plate");
+const searchResult = document.getElementById("search-result");
+
+const adminLoginBtn = document.getElementById("admin-login-btn");
+const adminPass = document.getElementById("admin-pass");
+const adminPanel = document.getElementById("admin-panel");
+const logoutBtn = document.getElementById("logout-btn");
+const refreshBtn = document.getElementById("refresh-btn");
+const adminTableBody = document.getElementById("admin-table-body");
+const historyTableBody = document.getElementById("history-table-body");
+
+const userPanel = document.getElementById("user-panel");
+const searchPanel = document.getElementById("search-panel");
+const adminLoginPanel = document.getElementById("admin-login");
+
+// Render slots
+function renderSlots(highlight=null){
+    slotsDiv.innerHTML = "";
+    for(let i=1;i<=maxSlots;i++){
+        const slotDiv = document.createElement("div");
+        slotDiv.classList.add("slot");
+        const car = Object.values(parking).find(c=>c.slot===i);
+        slotDiv.innerText = car ? `${i}: ${car.plate}` : `${i}: Empty`;
+        if(highlight && highlight===i){
+            slotDiv.classList.add("highlight");
+            setTimeout(()=>slotDiv.classList.remove("highlight"),800);
+        }
+        slotsDiv.appendChild(slotDiv);
+    }
+}
+
+// Admin tables
+function loadAdmin(){
+    adminTableBody.innerHTML = "";
+    Object.values(parking).forEach(car=>{
+        const row = document.createElement("tr");
+        row.innerHTML = `
+            <td>${car.plate}</td>
+            <td>${car.brand}</td>
+            <td>${car.slot}</td>
+            <td>${car.timeIn}</td>
+            <td><button class="remove-btn">Remove</button></td>
+        `;
+        row.querySelector(".remove-btn").onclick = ()=>{
+            const timeOut = new Date().toLocaleTimeString();
+            set(push(ref(db,'history')), {...car, timeOut});
+            remove(ref(db,'parking/'+car.plate));
+        };
+        adminTableBody.appendChild(row);
+    });
+
+    // Load history table
+    historyTableBody.innerHTML = "";
+    Object.values(history).forEach(car=>{
+        const row = document.createElement("tr");
+        row.innerHTML = `
+            <td>${car.plate}</td>
+            <td>${car.brand}</td>
+            <td>${car.slot}</td>
+            <td>${car.timeIn}</td>
+            <td>${car.timeOut}</td>
+        `;
+        historyTableBody.appendChild(row);
+    });
+}
+
+// Park car
+function parkCar(){
+    const plate = plateInput.value.trim();
+    const brand = brandInput.value.trim();
+    if(!plate||!brand){
+        parkResult.innerText = "Please enter both plate and brand.";
+        return;
+    }
+    if(Object.keys(parking).length >= maxSlots){
+        parkResult.innerText = "Parking FULL";
+        return;
+    }
+    const occupied = Object.values(parking).map(c=>c.slot);
+    let slot;
+    for(let i=1;i<=maxSlots;i++){
+        if(!occupied.includes(i)){
+            slot=i; break;
+        }
+    }
+    const timeIn = new Date().toLocaleTimeString();
+    set(ref(db,'parking/'+plate), { plate, brand, slot, timeIn });
+    plateInput.value=""; brandInput.value="";
+    parkResult.innerText = `Parked at slot ${slot}`;
+}
+
+// Leave parking
+function leaveCar(){
+    const plate = plateInput.value.trim();
+    if(!plate){
+        parkResult.innerText = "Enter your plate number to leave.";
+        return;
+    }
+    if(parking[plate]){
+        const car = parking[plate];
+        const timeOut = new Date().toLocaleTimeString();
+        set(push(ref(db,'history')), {...car, timeOut});
+        remove(ref(db,'parking/'+plate));
+        parkResult.innerText = `Car ${plate} has left.`;
+        plateInput.value=""; brandInput.value="";
+    } else {
+        parkResult.innerText = "Car not found in parking.";
+    }
+}
+
+// Find car
+function findCar(){
+    const plate = searchPlate.value.trim();
+    if(!plate){
+        searchResult.innerText = "Enter a plate number.";
+        return;
+    }
+    if(parking[plate]){
+        searchResult.innerText = `Car is at slot ${parking[plate].slot}`;
+    } else {
+        searchResult.innerText = "Car not found.";
+    }
+}
+
+// Admin login
+function adminLogin(){
+    if(adminPass.value==="admin123"){
+        adminPanel.style.display="block";
+        logoutBtn.style.display="inline-block";
+        refreshBtn.style.display="inline-block";
+        userPanel.style.display="none";
+        searchPanel.style.display="none";
+        adminLoginPanel.style.display="none";
+        adminPass.value="";
+        loadAdmin();
+    } else {
+        alert("Incorrect password");
+    }
+}
+
+// Logout
+function logout(){
+    adminPanel.style.display="none";
+    logoutBtn.style.display="none";
+    refreshBtn.style.display="none";
+    userPanel.style.display="block";
+    searchPanel.style.display="block";
+    adminLoginPanel.style.display="block";
+}
+
+// Refresh admin tables
+function refreshAdmin(){
+    loadAdmin();
+}
+
+// Event listeners
+parkBtn.onclick=parkCar;
+leaveBtn.onclick=leaveCar;
+searchBtn.onclick=findCar;
+adminLoginBtn.onclick=adminLogin;
+logoutBtn.onclick=logout;
+refreshBtn.onclick=refreshAdmin;
+
+// Firebase listeners
+const parkingRef = ref(db,'parking');
+onValue(parkingRef, snapshot=>{
+    parking = snapshot.val() || {};
+    renderSlots();
+    loadAdmin();
+});
+
+const historyRef = ref(db,'history');
+onValue(historyRef, snapshot=>{
+    history = snapshot.val() || {};
+    loadAdmin();
+});
+</script>
+
+</body>
+</html>
